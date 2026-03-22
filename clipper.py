@@ -381,7 +381,6 @@ def grok_smart_cut(segments: list, api_key: str, model: str = "llama-3.3-70b-ver
             max_completion_tokens=4096,
             top_p=1,
             stream=True,
-            stream_options={"include_usage": True},
             stop=None,
         )
         for chunk in stream:
