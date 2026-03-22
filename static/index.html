@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aiclipsyour.video</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { darkMode: 'class' }</script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap');
+    body { font-family: 'JetBrains Mono', monospace; }
+
+    .drop-hover { border-color: #6366f1 !important; background: rgba(99,102,241,0.05); }
+
+    #progress-bar { transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1); }
+
+    @keyframes pulse-glow {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.5); }
+      50%       { box-shadow: 0 0 0 5px rgba(99,102,241,0); }
+    }
+    .pulsing { animation: pulse-glow 1.8s ease-in-out infinite; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinning { animation: spin 1s linear infinite; }
+
+    /* Subtle shimmer on the bar while active */
+    @keyframes shimmer {
+      0%   { background-position: -200% center; }
+      100% { background-position:  200% center; }
+    }
+    #progress-bar.active {
+      background: linear-gradient(90deg, #6366f1 0%, #818cf8 40%, #6366f1 60%, #4f46e5 100%);
+      background-size: 200% auto;
+      animation: shimmer 2.5s linear infinite, pulse-glow 1.8s ease-in-out infinite;
+    }
+
+    .stage-item { transition: color 0.3s ease, opacity 0.3s ease; }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen flex flex-col items-center justify-center px-4 py-12">
+
+  <div class="w-full max-w-xl space-y-6">
+
+    <!-- Logo -->
+    <div class="text-center space-y-1">
+      <h1 class="text-2xl font-semibold tracking-tight">
+        <span class="text-indigo-400">aiclipsyour</span><span class="text-gray-400">.video</span>
+      </h1>
+      <p class="text-gray-600 text-xs">drop a video. get a clean cut.</p>
+    </div>
+
+    <!-- Upload zone -->
+    <div id="dropzone"
+         class="border-2 border-dashed border-gray-800 rounded-2xl p-12 text-center cursor-pointer transition-all duration-200"
+         onclick="document.getElementById('fileInput').click()"
+         ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
+      <input type="file" id="fileInput" class="hidden" accept="video/*,audio/*" onchange="onFileSelect(event)" />
+
+      <div id="uploadIdle" class="space-y-3">
+        <div class="text-5xl select-none">🎬</div>
+        <p class="text-gray-400 text-sm">Drop your video here</p>
+        <p class="text-gray-700 text-xs">MP4 · MOV · MKV · AVI · WebM</p>
+        <p class="text-gray-700 text-xs mt-1">minimum 3 minutes for AI cutting</p>
+      </div>
+
+      <div id="uploadReady" class="hidden space-y-2">
+        <div class="text-4xl select-none">✅</div>
+        <p id="fileName" class="text-indigo-300 text-sm font-semibold truncate"></p>
+        <p id="fileSize" class="text-gray-600 text-xs"></p>
+        <button onclick="event.stopPropagation(); submitJob()"
+                class="mt-3 px-6 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-sm font-semibold transition">
+          Process →
+        </button>
+      </div>
+    </div>
+
+    <!-- Progress panel -->
+    <div id="progressPanel" class="hidden bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-4">
+
+      <!-- Top row: spinner + stage name + elapsed clock -->
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <svg id="spinner" class="spinning w-4 h-4 text-indigo-400 flex-shrink-0" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+          </svg>
+          <span id="stageLabel" class="text-indigo-300 text-sm font-semibold">Uploading…</span>
+        </div>
+        <span id="elapsedLabel" class="text-gray-600 text-xs tabular-nums">0:00</span>
+      </div>
+
+      <!-- Progress bar -->
+      <div class="w-full bg-gray-800 rounded-full h-2 overflow-hidden">
+        <div id="progress-bar" class="h-2 rounded-full active" style="width:2%"></div>
+      </div>
+
+      <!-- Stage pipeline — shows all stages, highlights current -->
+      <div id="stagePipeline" class="flex items-start justify-between pt-1">
+        <!-- filled by JS -->
+      </div>
+
+      <!-- ETA row -->
+      <div class="flex items-center justify-between pt-1">
+        <span id="stageHint" class="text-gray-600 text-xs italic"></span>
+        <span id="etaLabel" class="text-gray-500 text-xs tabular-nums">estimating…</span>
+      </div>
+    </div>
+
+    <!-- Done bar -->
+    <div id="doneBar" class="hidden flex items-center justify-between bg-gray-900 border border-green-900 rounded-xl px-5 py-4">
+      <div class="space-y-0.5">
+        <p class="text-green-400 text-sm font-semibold">Done ✓</p>
+        <p id="doneStats" class="text-gray-500 text-xs"></p>
+      </div>
+      <div class="flex items-center gap-3">
+        <a id="downloadBtn" href="#"
+           class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-xs font-semibold transition">
+          ⬇ Download
+        </a>
+        <button onclick="reset()" class="text-gray-600 hover:text-gray-400 text-xs transition">New</button>
+      </div>
+    </div>
+
+    <!-- Error bar -->
+    <div id="errorBar" class="hidden bg-gray-900 border border-red-900 rounded-xl px-5 py-4 flex items-center justify-between">
+      <p id="errorMsg" class="text-red-400 text-xs"></p>
+      <button onclick="reset()" class="text-gray-600 hover:text-gray-400 text-xs ml-4 transition">Try again</button>
+    </div>
+
+  </div>
+
+<script>
+// ── Stage definitions ────────────────────────────────────────────────────────
+// pct: cumulative progress checkpoint when this stage starts
+// weight: fraction of total processing time (must sum to 1.0)
+// hint: shown below the bar while this stage is active
+const STAGES = [
+  { label: "Prepare",    match: "Preparing",   pct: 8,   weight: 0.08, hint: "Reading your video file…" },
+  { label: "Transcribe", match: "Transcribing",pct: 50,  weight: 0.42, hint: "Converting speech to text via AI…" },
+  { label: "AI cut",     match: "AI smart",    pct: 68,  weight: 0.18, hint: "Finding the best moments to keep…" },
+  { label: "Silence",    match: "Detecting",   pct: 83,  weight: 0.15, hint: "Scanning for silent gaps…" },
+  { label: "Export",     match: "Exporting",   pct: 95,  weight: 0.17, hint: "Encoding final video…" },
+];
+
+// ── State ────────────────────────────────────────────────────────────────────
+let selectedFile  = null;
+let evtSource     = null;
+let videoDuration = null;   // seconds from server
+let currentStage  = -1;     // index into STAGES
+let startTime     = null;
+let clockTimer    = null;   // setInterval for elapsed clock + ETA refresh
+let tweenRaf      = null;   // requestAnimationFrame for bar tween
+let displayedPct  = 2;
+let targetPct     = 2;
+let jobToken      = null;   // access token issued by server — required for stream/download
+
+// Timestamps when each stage actually started (for real ETA math)
+const stageStartTimes = {};
+
+// ── Drag & drop ──────────────────────────────────────────────────────────────
+function onDragOver(e) {
+  e.preventDefault();
+  document.getElementById('dropzone').classList.add('drop-hover');
+}
+function onDragLeave() {
+  document.getElementById('dropzone').classList.remove('drop-hover');
+}
+function onDrop(e) {
+  e.preventDefault();
+  onDragLeave();
+  const f = e.dataTransfer.files[0];
+  if (f) setFile(f);
+}
+function onFileSelect(e) { setFile(e.target.files[0]); }
+
+function setFile(f) {
+  selectedFile = f;
+  document.getElementById('uploadIdle').classList.add('hidden');
+  document.getElementById('uploadReady').classList.remove('hidden');
+  document.getElementById('fileName').textContent = f.name;
+  document.getElementById('fileSize').textContent = (f.size / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+// ── Build stage pipeline UI ──────────────────────────────────────────────────
+function buildPipeline() {
+  const container = document.getElementById('stagePipeline');
+  container.innerHTML = '';
+  STAGES.forEach((s, i) => {
+    const col = document.createElement('div');
+    col.className = 'flex flex-col items-center gap-1.5';
+    col.style.width = `${100 / STAGES.length}%`;
+
+    const dot = document.createElement('div');
+    dot.id = `dot-${i}`;
+    dot.className = 'w-2 h-2 rounded-full bg-gray-700 transition-all duration-300';
+
+    const lbl = document.createElement('span');
+    lbl.id = `dlbl-${i}`;
+    lbl.className = 'stage-item text-gray-700 text-center leading-tight';
+    lbl.style.fontSize = '9px';
+    lbl.textContent = s.label;
+
+    col.appendChild(dot);
+    col.appendChild(lbl);
+    container.appendChild(col);
+  });
+}
+
+// ── Progress bar tween ───────────────────────────────────────────────────────
+function tweenStep() {
+  if (displayedPct < targetPct) {
+    // Speed: faster for small gaps, slower as we approach target
+    const gap   = targetPct - displayedPct;
+    const speed = Math.max(0.03, Math.min(0.4, gap * 0.04));
+    displayedPct = Math.min(targetPct, displayedPct + speed);
+    document.getElementById('progress-bar').style.width = displayedPct + '%';
+  }
+  tweenRaf = requestAnimationFrame(tweenStep);
+}
+
+// ── Advance to a stage ───────────────────────────────────────────────────────
+function advanceToStage(idx) {
+  if (idx <= currentStage) return;
+  currentStage = idx;
+  stageStartTimes[idx] = Date.now();
+
+  // Update dots + labels
+  for (let i = 0; i < STAGES.length; i++) {
+    const dot = document.getElementById(`dot-${i}`);
+    const lbl = document.getElementById(`dlbl-${i}`);
+    if (!dot) continue;
+    if (i < idx) {
+      dot.className = 'w-2 h-2 rounded-full bg-indigo-400 transition-all duration-300';
+      lbl.className = 'stage-item text-indigo-400 text-center leading-tight';
+    } else if (i === idx) {
+      dot.className = 'w-2 h-2 rounded-full bg-indigo-500 pulsing transition-all duration-300';
+      lbl.className = 'stage-item text-indigo-300 text-center leading-tight font-semibold';
+    } else {
+      dot.className = 'w-2 h-2 rounded-full bg-gray-700 transition-all duration-300';
+      lbl.className = 'stage-item text-gray-700 text-center leading-tight';
+    }
+    lbl.style.fontSize = '9px';
+  }
+
+  // Advance bar target to this stage's checkpoint
+  targetPct = STAGES[idx].pct;
+
+  // Update labels
+  document.getElementById('stageLabel').textContent = STAGES[idx].label + '…';
+  document.getElementById('stageHint').textContent  = STAGES[idx].hint;
+
+  refreshEta();
+}
+
+// ── ETA calculation ──────────────────────────────────────────────────────────
+// Strategy: use video duration × per-stage weight to estimate each stage's
+// expected duration. Compare against actual elapsed to give a real estimate.
+function refreshEta() {
+  if (!videoDuration || currentStage < 0 || !startTime) return;
+
+  const now     = Date.now();
+  const elapsed = (now - startTime) / 1000;
+
+  // Estimate total job time based on video duration
+  // Empirically: ~1.2× video duration for the full pipeline on average hardware
+  const estimatedTotal = videoDuration * 1.2;
+
+  // How far through the pipeline are we by weight?
+  let weightDone = 0;
+  for (let i = 0; i < currentStage; i++) weightDone += STAGES[i].weight;
+  // Add partial progress through current stage based on time spent in it
+  const stageStart   = stageStartTimes[currentStage] || now;
+  const stageElapsed = (now - stageStart) / 1000;
+  const stageEst     = estimatedTotal * STAGES[currentStage].weight;
+  const stageFrac    = stageEst > 0 ? Math.min(0.9, stageElapsed / stageEst) : 0;
+  weightDone += STAGES[currentStage].weight * stageFrac;
+
+  // Blend: 70% model estimate, 30% actual elapsed extrapolation
+  const modelRemain   = estimatedTotal * (1 - weightDone);
+  const actualRemain  = weightDone > 0.05 ? (elapsed / weightDone) * (1 - weightDone) : modelRemain;
+  const remain        = modelRemain * 0.7 + actualRemain * 0.3;
+
+  const el = document.getElementById('etaLabel');
+  if (remain < 8) {
+    el.textContent = 'almost done…';
+  } else {
+    const mins = Math.floor(remain / 60);
+    const secs = Math.floor(remain % 60);
+    el.textContent = mins > 0 ? `~${mins}m ${secs}s left` : `~${secs}s left`;
+  }
+}
+
+// ── Elapsed clock (ticks every second, also refreshes ETA) ──────────────────
+function startClock() {
+  clockTimer = setInterval(() => {
+    if (!startTime) return;
+    const s   = Math.floor((Date.now() - startTime) / 1000);
+    const m   = Math.floor(s / 60);
+    const sec = s % 60;
+    document.getElementById('elapsedLabel').textContent =
+      `${m}:${String(sec).padStart(2, '0')}`;
+    refreshEta();
+  }, 1000);
+}
+
+// ── Submit ───────────────────────────────────────────────────────────────────
+async function submitJob() {
+  if (!selectedFile) return;
+
+  document.getElementById('dropzone').classList.add('hidden');
+  document.getElementById('progressPanel').classList.remove('hidden');
+  document.getElementById('doneBar').classList.add('hidden');
+  document.getElementById('errorBar').classList.add('hidden');
+
+  buildPipeline();
+  startTime = Date.now();
+  tweenRaf  = requestAnimationFrame(tweenStep);
+  startClock();
+
+  document.getElementById('stageLabel').textContent = 'Uploading…';
+  document.getElementById('stageHint').textContent  = 'Sending your video to the server…';
+
+  const fd = new FormData();
+  fd.append('file', selectedFile);
+
+  let data;
+  try {
+    const res = await fetch('/api/process', { method: 'POST', body: fd });
+    data = await res.json();
+    if (!res.ok) {
+      stopProgress();
+      showError(data.detail || 'Upload failed');
+      return;
+    }
+  } catch(e) {
+    stopProgress();
+    showError(`Upload failed: ${e}`);
+    return;
+  }
+
+  if (data.duration) videoDuration = data.duration;
+  if (data.token)    jobToken      = data.token;
+  advanceToStage(0);
+  openStream(data.job_id);
+}
+
+// ── SSE stream ───────────────────────────────────────────────────────────────
+function openStream(jobId) {
+  const url = `/api/stream/${jobId}?token=${encodeURIComponent(jobToken || '')}`;
+  evtSource = new EventSource(url);
+
+  evtSource.onmessage = (e) => {
+    const event = JSON.parse(e.data);
+
+    if (event.type === 'duration' && event.duration) {
+      videoDuration = event.duration;
+    }
+
+    if (event.type === 'stage') {
+      // Match server stage string to our STAGES array
+      const idx = STAGES.findIndex(s => event.stage.toLowerCase().includes(s.match.toLowerCase()));
+      if (idx !== -1) advanceToStage(idx);
+    }
+
+    if (event.type === 'done') {
+      evtSource.close();
+      finishProgress();
+      showDone(jobId);
+    }
+
+    if (event.type === 'error') {
+      evtSource.close();
+      stopProgress();
+      showError(event.msg || 'Processing failed — check server logs.');
+    }
+  };
+
+  evtSource.onerror = () => {
+    if (evtSource.readyState !== EventSource.CLOSED) {
+      document.getElementById('stageHint').textContent = 'Reconnecting…';
+    }
+  };
+}
+
+// ── Progress helpers ─────────────────────────────────────────────────────────
+function finishProgress() {
+  clearInterval(clockTimer);
+  cancelAnimationFrame(tweenRaf);
+
+  STAGES.forEach((_, i) => {
+    const dot = document.getElementById(`dot-${i}`);
+    const lbl = document.getElementById(`dlbl-${i}`);
+    if (dot) dot.className = 'w-2 h-2 rounded-full bg-green-400 transition-all duration-300';
+    if (lbl) { lbl.className = 'stage-item text-green-400 text-center leading-tight'; lbl.style.fontSize = '9px'; }
+  });
+
+  const bar = document.getElementById('progress-bar');
+  bar.classList.remove('active');
+  bar.style.background = '#34d399';
+  bar.style.width = '100%';
+
+  document.getElementById('stageLabel').textContent = 'Complete';
+  document.getElementById('stageHint').textContent  = '';
+  document.getElementById('etaLabel').textContent   = '';
+  document.getElementById('spinner').style.display  = 'none';
+}
+
+function stopProgress() {
+  clearInterval(clockTimer);
+  cancelAnimationFrame(tweenRaf);
+  document.getElementById('progressPanel').classList.add('hidden');
+  document.getElementById('dropzone').classList.remove('hidden');
+  document.getElementById('uploadIdle').classList.remove('hidden');
+  document.getElementById('uploadReady').classList.add('hidden');
+}
+
+// ── Result / error ───────────────────────────────────────────────────────────
+function showDone(jobId) {
+  const elapsed = startTime ? ((Date.now() - startTime) / 1000).toFixed(0) : '?';
+  document.getElementById('doneBar').classList.remove('hidden');
+  document.getElementById('doneStats').textContent = `processed in ${elapsed}s`;
+  document.getElementById('downloadBtn').href = `/api/download/${jobId}?token=${encodeURIComponent(jobToken || '')}`;
+}
+
+function showError(msg) {
+  document.getElementById('progressPanel').classList.add('hidden');
+  document.getElementById('dropzone').classList.remove('hidden');
+  document.getElementById('errorBar').classList.remove('hidden');
+  document.getElementById('errorMsg').textContent = msg || 'Something went wrong.';
+}
+
+function reset() {
+  if (evtSource) { evtSource.close(); evtSource = null; }
+  clearInterval(clockTimer);
+  cancelAnimationFrame(tweenRaf);
+
+  selectedFile  = null;
+  videoDuration = null;
+  currentStage  = -1;
+  startTime     = null;
+  displayedPct  = 2;
+  targetPct     = 2;
+  jobToken      = null;
+
+  const bar = document.getElementById('progress-bar');
+  bar.style.width = '2%';
+  bar.style.background = '';
+  bar.classList.add('active');
+  document.getElementById('spinner').style.display = '';
+  document.getElementById('progressPanel').classList.add('hidden');
+  document.getElementById('doneBar').classList.add('hidden');
+  document.getElementById('errorBar').classList.add('hidden');
+  document.getElementById('dropzone').classList.remove('hidden');
+  document.getElementById('uploadIdle').classList.remove('hidden');
+  document.getElementById('uploadReady').classList.add('hidden');
+  document.getElementById('fileInput').value = '';
+}
+</script>
+</body>
+</html>
