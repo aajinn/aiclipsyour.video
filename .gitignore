@@ -1,2 +1,21 @@
+# Environment
 .env
-_tmp_clipper/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+
+# Node
+backend/node_modules/
+
+# Temp / processing artifacts
+_tmp_*/
+uploads/
+outputs/
+
+# OS
+.DS_Store
+Thumbs.db
