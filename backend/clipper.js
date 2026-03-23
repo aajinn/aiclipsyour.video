@@ -297,7 +297,7 @@ export async function groqSmartCut(segments, apiKey, model = "llama-3.3-70b-vers
   onProgress?.(`Groq selected ${cuts.length}/${segments.length} segments`);
 
   cuts = snapCutsToSegments(cuts, segments, videoDuration);
-  cuts = mergeCloseSegments(cuts, 2.0);
+  cuts = mergeCloseSegments(cuts, 3.0); // merge segments within 3s — avoids hard cuts on nearby speech
 
   const totalKept = cuts.reduce((a, c) => a + (c.end - c.start), 0);
   const coverage  = videoDuration ? totalKept / videoDuration : 0;
@@ -353,9 +353,9 @@ export async function ffmpegConcat(inputPath, outputPath, ranges, videoCodec, au
 // ── Main clip_video ───────────────────────────────────────────────────────────
 
 const BEST_PARAMS = {
-  silenceThresh:  -35,
-  minSilenceLen:  800,
-  paddingMs:      300,
+  silenceThresh:  -45,   // was -35 — less aggressive, won't cut quiet speech
+  minSilenceLen:  1500,  // was 800ms — only remove pauses longer than 1.5s
+  paddingMs:      500,   // was 300ms — wider buffer around speech edges
   videoCodec:     "libx264",
   audioCodec:     "aac",
   crf:            23,
@@ -393,7 +393,7 @@ export { BEST_PARAMS };
 export async function clipVideo(opts) {
   const {
     inputPath, outputPath,
-    silenceThresh = -35, minSilenceLen = 800, paddingMs = 300,
+    silenceThresh = -45, minSilenceLen = 1500, paddingMs = 500,
     videoCodec = "libx264", audioCodec = "aac", crf = 23,
     audioOnly = false,
     useGroq = false, aaiApiKey = null, groqApiKey = null,
@@ -467,14 +467,14 @@ export async function clipVideo(opts) {
   onStage("Detecting silences");
   let { ranges, durationMs } = await getNonSilentRanges(tmpAudio, silenceThresh, minSilenceLen, paddingMs, onProgress);
 
-  // Retry if too conservative
+  // Retry if too conservative — loosen the threshold, don't tighten it
   const totalSpeechMs = ranges.reduce((a, [s, e]) => a + (e - s), 0);
   if (totalSpeechMs < durationMs * 0.15) {
     onProgress("Silence detection too conservative — retrying with looser threshold");
     ({ ranges, durationMs } = await getNonSilentRanges(
       tmpAudio,
-      Math.max(silenceThresh - 15, -60),
-      Math.max(Math.floor(minSilenceLen / 2), 200),
+      Math.max(silenceThresh - 10, -55),  // slightly more sensitive
+      Math.max(Math.floor(minSilenceLen * 0.6), 500), // still keep 500ms min
       paddingMs,
       onProgress,
     ));
