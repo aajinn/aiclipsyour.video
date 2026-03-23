@@ -3,8 +3,20 @@
  * All env vars are read here — components import from this file, never from process.env directly.
  */
 
-export const BACKEND_URL: string =
-  process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
+// NEXT_PUBLIC_* vars are baked in at build time by Next.js.
+// In development this comes from .env.development, in production from .env.production
+// or from Vercel's Environment Variables dashboard.
+export const BACKEND_URL: string = (() => {
+  const url = process.env.NEXT_PUBLIC_BACKEND_URL;
+  if (!url) {
+    // Warn loudly in dev; in prod this means the env var wasn't set at build time
+    console.error(
+      "[config] NEXT_PUBLIC_BACKEND_URL is not set. " +
+      "Set it in .env.production or in the Vercel Environment Variables dashboard."
+    );
+  }
+  return (url ?? "").replace(/\/$/, ""); // strip trailing slash
+})();
 
 export const api = {
   process:  `${BACKEND_URL}/api/process`,
