@@ -5,7 +5,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..", "..");
 
 export const PORT               = parseInt(process.env.PORT               ?? "8000");
-export const ALLOWED_ORIGIN     = process.env.ALLOWED_ORIGIN              ?? "*";
+export const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN ?? "*";
+
+// Support comma-separated list of allowed origins e.g. "https://foo.com,https://bar.vercel.app"
+export const ALLOWED_ORIGINS = new Set(
+  ALLOWED_ORIGIN.split(",").map(o => o.trim()).filter(Boolean)
+);
 export const MAX_CONCURRENT     = parseInt(process.env.MAX_JOBS           ?? "10");
 export const MAX_UPLOAD_MB      = parseInt(process.env.MAX_UPLOAD_MB      ?? "500");
 export const JOB_TTL_MS         = parseInt(process.env.JOB_TTL            ?? "3600") * 1000;

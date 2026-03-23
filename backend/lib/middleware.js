@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "crypto";
 import path from "path";
-import { ALLOWED_EXTENSIONS, ALLOWED_ORIGIN, REQUEST_TIMEOUT_MS, UUID_RE } from "./config.js";
+import { ALLOWED_ORIGINS, ALLOWED_ORIGIN, REQUEST_TIMEOUT_MS, UUID_RE } from "./config.js";
 import { logger } from "./logger.js";
 
 // ── Client IP ─────────────────────────────────────────────────────────────────
@@ -90,11 +90,16 @@ export function securityHeaders(req, res, next) {
 }
 
 export function cors(req, res, next) {
-  res.set({
-    "Access-Control-Allow-Origin":  ALLOWED_ORIGIN,
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-  });
+  const origin = req.headers.origin ?? "";
+  const isWildcard = ALLOWED_ORIGIN === "*";
+  const allowed = isWildcard || ALLOWED_ORIGINS.has(origin);
+
+  if (allowed) {
+    res.set("Access-Control-Allow-Origin", isWildcard ? "*" : origin);
+    res.set("Vary", "Origin");
+  }
+  res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 }
