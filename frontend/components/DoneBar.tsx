@@ -1,5 +1,7 @@
 "use client";
 
+import { api } from "@/lib/config";
+
 interface Props {
   jobId:     string;
   token:     string;
@@ -9,8 +11,7 @@ interface Props {
 
 export default function DoneBar({ jobId, token, startTime, onReset }: Props) {
   const elapsed = startTime ? Math.round((Date.now() - startTime) / 1000) : 0;
-  const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
-  const downloadUrl = `${backendBase}/api/download/${jobId}?token=${encodeURIComponent(token)}`;
+  const downloadUrl = api.download(jobId, token);
 
   return (
     <div className="flex items-center justify-between bg-gray-900 border border-green-900 rounded-xl px-5 py-4">

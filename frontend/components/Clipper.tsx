@@ -5,6 +5,7 @@ import Dropzone from "./Dropzone";
 import ProgressPanel from "./ProgressPanel";
 import DoneBar from "./DoneBar";
 import ErrorBar from "./ErrorBar";
+import { api } from "@/lib/config";
 
 export type AppState = "idle" | "uploading" | "processing" | "done" | "error";
 
@@ -46,12 +47,9 @@ export default function Clipper() {
     const fd = new FormData();
     fd.append("file", file);
 
-    // Post directly to the backend to avoid Next.js proxy body size limits
-    const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
-
-    let data: { job_id: string; token: string; duration: number; detail?: string };
+    let data: { job_id: string; token: string; duration: number; detail?: string; error?: string };
     try {
-      const res = await fetch(`${backendBase}/api/process`, { method: "POST", body: fd });
+      const res = await fetch(api.process, { method: "POST", body: fd });
       const text = await res.text();
       let parsed: typeof data;
       try {
@@ -62,7 +60,7 @@ export default function Clipper() {
         return;
       }
       if (!res.ok) {
-        setErrorMsg(parsed.detail ?? "Upload failed");
+        setErrorMsg(parsed.detail ?? parsed.error ?? "Upload failed");
         setAppState("error");
         return;
       }
@@ -79,8 +77,8 @@ export default function Clipper() {
     setAppState("processing");
     advanceToStage(0);
 
-    // Open SSE stream directly to backend too
-    const url = `${backendBase}/api/stream/${data.job_id}?token=${encodeURIComponent(data.token)}`;
+    // Open SSE stream
+    const url = api.stream(data.job_id, data.token);
     const es = new EventSource(url);
     evtSourceRef.current = es;
 
