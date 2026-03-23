@@ -463,11 +463,7 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-// Serve static frontend
-const staticDir = path.join(__dirname, "..", "static");
-if (existsSync(staticDir)) {
-  app.use(express.static(staticDir));
-}
+// Static frontend is now served by the Next.js app (frontend/)
 
 // Generic error handler
 app.use((err, req, res, next) => {
