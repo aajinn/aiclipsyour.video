@@ -20,8 +20,8 @@ export const REQUEST_TIMEOUT_MS = parseInt(process.env.REQUEST_TIMEOUT    ?? "30
 export const MIN_VIDEO_SECONDS  = 180;
 export const MAX_QUEUE_DEPTH    = MAX_CONCURRENT * 4;
 
-export const UPLOAD_DIR = path.join(root, "uploads");
-export const OUTPUT_DIR = path.join(root, "outputs");
+export const UPLOAD_DIR = process.env.UPLOAD_DIR ?? path.join(root, "uploads");
+export const OUTPUT_DIR = process.env.OUTPUT_DIR ?? path.join(root, "outputs");
 
 export const ALLOWED_EXTENSIONS = new Set([
   ".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".mp3", ".wav", ".m4a",

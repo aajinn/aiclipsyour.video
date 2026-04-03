@@ -1,25 +1,39 @@
-# Aiclipsyour.video
+# aiclipsyour.video
 
 Remove silences and AI-smart-cut your videos. AssemblyAI transcribes, Groq picks the best segments, ffmpeg does the cutting — original audio untouched, perfectly in sync.
 
 ---
 
-## Features
+## How it works
 
-- Silence detection and removal
-- AI smart cutting — AssemblyAI transcribes, Groq selects semantically complete segments (preserves opinions, emotional lines, complete thoughts)
-- Pure ffmpeg export — audio and video cut at identical timestamps, no desync
-- Duplicate segment detection — overlapping or repeated ranges are merged before export
-- Real-time progress in the web UI with per-stage ETA
-- Transcript export (.txt + .json)
-- Web UI (FastAPI + Tailwind CSS) or CLI
-- API cost breakdown in terminal output
+1. Upload a video (min 3 minutes) via the web UI
+2. ffprobe reads the duration; audio is extracted at 16kHz mono
+3. AssemblyAI transcribes the audio (if keys are set)
+4. Groq selects the best segments to keep using a senior-editor system prompt
+5. Silence detection fills in or replaces AI cuts as needed
+6. Ranges are deduplicated, sorted, and overlaps merged
+7. Each segment is cut from the source with `-c copy` — both streams at identical timestamps
+8. All segments are joined with the ffmpeg concat demuxer and encoded once
+9. The output file is streamed back as a single-use download
+
+Original audio is never filtered or re-encoded during cutting.
+
+---
+
+## Stack
+
+| Layer | Tech |
+|---|---|
+| Frontend | Next.js 15, React 19, Tailwind CSS 4 |
+| Backend | Node.js, Express 4 |
+| Processing | ffmpeg / ffprobe, AssemblyAI, Groq |
+| Deployment | Vercel (frontend), any Node host (backend) |
 
 ---
 
 ## Requirements
 
-- Python 3.10+
+- Node.js 18+
 - [ffmpeg](https://ffmpeg.org/download.html) on PATH
 
 ```bash
@@ -32,87 +46,111 @@ winget install ffmpeg
 ## Setup
 
 ```bash
-cd av_clipper
-pip install -r requirements.txt
+# Backend
+cd backend
+npm install
+
+# Frontend
+cd frontend
+npm install
 ```
 
-Copy `.env.example` to `.env` and fill in your keys:
-
-```bash
-copy .env.example .env
-```
+Copy `.env.example` to `backend/.env` and fill in your keys:
 
 ```env
 ASSEMBLYAI_API_KEY=your-assemblyai-key
 GROQ_API_KEY=your-groq-key
+
+# CORS — comma-separated list of allowed origins
+ALLOWED_ORIGIN=http://localhost:3000
 ```
+
+Both API keys are optional. Without them the tool falls back to silence-detection-only mode.
 
 - AssemblyAI → https://www.assemblyai.com (free tier: 100 hrs/month)
 - Groq → https://console.groq.com (free tier available)
 
-Both keys are optional — without them the tool falls back to silence-detection-only mode.
-
 ---
 
-## Web UI
+## Running locally
 
 ```bash
-python server.py
+# Backend (port 8000)
+cd backend
+npm run dev
+
+# Frontend (port 3000)
+cd frontend
+npm run dev
 ```
 
-Open http://localhost:8000, drop in a video (minimum 3 minutes), and hit **Process →**.
-
-Progress updates in real time — each stage appears as it starts, with an estimated time remaining based on your video length.
+Open http://localhost:3000, drop in a video, and hit Process.
 
 ---
 
-## CLI
+## API
 
-```bash
-# Silence removal only
-python clipper.py input.mp4 output.mp4
+All endpoints are prefixed `/api`.
 
-# With AI smart cutting
-python clipper.py input.mp4 output.mp4 --grok
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/process` | Upload video, queue job → `{ job_id, token, duration }` |
+| `GET` | `/stream/:jobId?token=` | SSE progress stream |
+| `GET` | `/download/:jobId?token=` | Single-use output download (deletes file after) |
+| `GET` | `/status/:jobId?token=` | Poll job status (JSON) |
+| `GET` | `/health` | Service health + queue capacity |
 
-# Interactive wizard
-python clipper.py
-```
+Jobs are token-protected. The token is returned on upload and must be passed as a query param on all subsequent requests.
 
-### Options
+### SSE event types
 
-```
---silence-thresh   INT     Silence threshold in dBFS (default: -40)
---min-silence      INT     Minimum silence length to cut in ms (default: 500)
---padding          INT     Padding to keep around speech in ms (default: 200)
-
---grok                     Enable AI smart cutting
---aai-key          STR     AssemblyAI API key (or set in .env)
---grok-key         STR     Groq API key (or set in .env)
---grok-model       STR     Groq model (default: llama-3.3-70b-versatile)
---language         STR     Language code for transcription (default: en)
---speaker-labels           Detect speaker labels
---no-transcript            Skip saving transcript files
-
---video-codec      STR     libx264 / libx265 / libvpx-vp9 (default: libx264)
---audio-codec      STR     aac / mp3 / libopus (default: aac)
---crf              INT     Quality 0–51, lower=better (default: 23)
---audio-only               Export audio only as .wav
+```json
+{ "type": "stage",    "stage": "Transcribing speech" }
+{ "type": "done" }
+{ "type": "error",    "msg": "Processing failed — check server logs." }
+{ "type": "duration", "duration": 312.4 }
 ```
 
 ---
 
-## How cutting works
+## Configuration
 
-1. ffprobe reads the video duration
-2. Audio is extracted at 16kHz mono for analysis
-3. AssemblyAI transcribes (if keys present), Groq selects segments to keep
-4. Silence detection fills in or replaces AI cuts as needed
-5. Ranges are deduplicated, sorted, and overlaps merged
-6. Each segment is cut from the source with `-c copy` — both audio and video streams at the same timestamps
-7. All segments are joined with the ffmpeg concat demuxer and encoded once
+All backend config is via environment variables.
 
-Original audio is never filtered or processed — what went in comes out.
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `8000` | HTTP port |
+| `ALLOWED_ORIGIN` | `*` | CORS origin(s), comma-separated |
+| `MAX_JOBS` | `10` | Max concurrent processing jobs |
+| `MAX_UPLOAD_MB` | `500` | Upload size limit |
+| `JOB_TTL` | `3600` | Seconds before a job is cleaned up |
+| `RATE_LIMIT_UPLOADS` | `5` | Max uploads per IP per hour |
+| `RATE_LIMIT_STREAM` | `30` | Max download requests per IP per hour |
+| `REQUEST_TIMEOUT` | `300` | Request timeout in seconds |
+| `UPLOAD_DIR` | `./uploads` | Where uploads are stored |
+| `OUTPUT_DIR` | `./outputs` | Where processed files are stored |
+| `ASSEMBLYAI_API_KEY` | — | AssemblyAI key (enables transcription) |
+| `GROQ_API_KEY` | — | Groq key (enables AI smart cutting) |
+
+Frontend config:
+
+| Variable | Description |
+|---|---|
+| `NEXT_PUBLIC_BACKEND_URL` | Backend base URL, set at build time |
+
+---
+
+## Processing defaults
+
+| Parameter | Default | Description |
+|---|---|---|
+| `silenceThresh` | `-45 dBFS` | Silence threshold |
+| `minSilenceLen` | `1500 ms` | Minimum silence length to cut |
+| `paddingMs` | `500 ms` | Buffer kept around speech edges |
+| `videoCodec` | `libx264` | Output video codec |
+| `audioCodec` | `aac` | Output audio codec |
+| `crf` | `23` | Quality (0–51, lower = better) |
+| `groqModel` | `llama-3.3-70b-versatile` | Groq model for smart cutting |
 
 ---
 
@@ -131,12 +169,31 @@ A 10-minute video typically costs < $0.10 total.
 ## File structure
 
 ```
-av_clipper/
-  clipper.py        # core processing + CLI
-  server.py         # FastAPI web server
-  static/
-    index.html      # frontend
-  .env              # API keys (gitignored)
-  .env.example      # template
-  requirements.txt
+/
+  backend/
+    server.js           # Express app entry point
+    clipper.js          # Core processing: silence detection, transcription, AI cut, ffmpeg concat
+    routes/
+      process.js        # POST /api/process — upload + queue
+      stream.js         # GET  /api/stream/:jobId — SSE
+      download.js       # GET  /api/download/:jobId — single-use download
+      status.js         # GET  /api/status/:jobId + /api/health
+    lib/
+      config.js         # All env var parsing
+      jobs.js           # In-memory job store + semaphore + TTL cleanup
+      runner.js         # Job executor (wraps clipper.js)
+      middleware.js     # CORS, rate limiting, validation, security headers
+      logger.js         # Structured logger
+  frontend/
+    app/                # Next.js app router
+    components/
+      Clipper.tsx        # Main UI state machine
+      Dropzone.tsx       # File drop/select
+      ProgressPanel.tsx  # Stage progress with ETA
+      DoneBar.tsx        # Download + reset
+      ErrorBar.tsx       # Error display
+    lib/
+      config.ts          # API URL config
+  uploads/              # Temporary upload storage
+  outputs/              # Processed output storage
 ```
